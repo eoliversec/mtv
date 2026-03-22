@@ -15,17 +15,20 @@ const $desc = document.getElementById('description');
 
 // --- Theme ---
 
+const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
+
 function applyTheme(mode) {
   localStorage.setItem('mtv-theme', mode);
-  if (mode === 'system') {
-    document.documentElement.removeAttribute('data-theme');
-  } else {
-    document.documentElement.setAttribute('data-theme', mode);
-  }
+  const resolved = mode === 'system' ? (darkMq.matches ? 'dark' : 'light') : mode;
+  document.documentElement.setAttribute('data-theme', resolved);
   document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.classList.toggle('on', btn.dataset.theme === mode);
   });
 }
+
+darkMq.addEventListener('change', () => {
+  if ((localStorage.getItem('mtv-theme') || 'system') === 'system') applyTheme('system');
+});
 
 // --- Populate country select from data ---
 
@@ -104,21 +107,23 @@ function buildSegment(type, apogee, range, dm, hm, t0, t1) {
   return pts.join(' ');
 }
 
-// --- Legend ---
+// --- Color helpers ---
+
+function parseHex(hex) {
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
 
 function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
+  const [r, g, b] = parseHex(hex);
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function darkenHex(hex) {
-  const r = Math.round(parseInt(hex.slice(1, 3), 16) * 0.6);
-  const g = Math.round(parseInt(hex.slice(3, 5), 16) * 0.6);
-  const b = Math.round(parseInt(hex.slice(5, 7), 16) * 0.6);
-  return `rgb(${r},${g},${b})`;
+  const [r, g, b] = parseHex(hex);
+  return `rgb(${Math.round(r * 0.6)},${Math.round(g * 0.6)},${Math.round(b * 0.6)})`;
 }
+
+// --- Legend ---
 
 function renderLegend(allMode, tk) {
   let items;
@@ -139,25 +144,45 @@ function renderLegend(allMode, tk) {
   ).join('');
 }
 
+// --- Reference lines ---
+
+const REFERENCE_LINES = [
+  { alt: 12, stroke: 'var(--border-secondary)', label: 'commercial airspace (~12 km)', op: 0.4, textOp: 0.6, dash: '3 2', minRatio: 0.04 },
+  { alt: 100, stroke: null, label: 'edge of space (100 km)', op: 0.4, textOp: 0.55, dash: '5 3' },
+  { alt: 408, stroke: 'var(--border-tertiary)', label: 'ISS orbit ~408 km', op: 0.25, textOp: 0.45, dash: '4 3' },
+];
+
+function renderRefLines(hm, dm) {
+  let h = '';
+  REFERENCE_LINES.forEach(ref => {
+    if (ref.alt >= hm) return;
+    if (ref.minRatio && ref.alt / hm < ref.minRatio) return;
+    const y = project(0, ref.alt, dm, hm).y;
+    const stroke = ref.stroke || SPEED_COLORS.sub;
+    const fill = ref.stroke ? 'var(--text-tertiary)' : SPEED_COLORS.sub;
+    h += `<line x1="${X0}" y1="${y.toFixed(1)}" x2="${X1}" y2="${y.toFixed(1)}" stroke="${stroke}" stroke-width="0.5" stroke-dasharray="${ref.dash}" opacity="${ref.op}"/>`;
+    h += `<text x="${X1 - 4}" y="${(y - 4).toFixed(1)}" font-size="9" fill="${fill}" text-anchor="end" opacity="${ref.textOp}">${ref.label}</text>`;
+  });
+  return h;
+}
+
 // --- Main render ---
 
 function render() {
   const country = COUNTRIES[selectedCountry];
-  const active = selectedType;
-  const allMode = active === 3;
-  const noData = active < 3 && !country[TYPE_KEYS[active]];
+  const allMode = selectedType === 3;
+  const noData = selectedType < 3 && !country[TYPE_KEYS[selectedType]];
 
-  // No data for this type — show message and buttons, hide chart
   if (noData) {
-    $chart.innerHTML = `<text x="340" y="180" font-size="14" fill="var(--text-tertiary)" text-anchor="middle">${country.label} has no known ${TYPE_NAMES[TYPE_KEYS[active]].toLowerCase()} capability</text>`;
+    $chart.innerHTML = `<text x="340" y="180" font-size="14" fill="var(--text-tertiary)" text-anchor="middle">${country.label} has no known ${TYPE_NAMES[TYPE_KEYS[selectedType]].toLowerCase()} capability</text>`;
     $summary.innerHTML = '';
     $desc.textContent = '';
-    renderLegend(false, TYPE_KEYS[active]);
-    renderButtons(active);
+    renderLegend(false, TYPE_KEYS[selectedType]);
+    renderButtons();
     return;
   }
 
-  const { dm, hm } = computeScales(selectedCountry, active);
+  const { dm, hm } = computeScales(selectedCountry, selectedType);
   const useMeters = hm < 1;
   let h = '';
 
@@ -171,25 +196,10 @@ function render() {
 
   // Y-axis label
   const mY = (Y0 + Y1) / 2;
-  const altUnit = useMeters ? 'altitude (m)' : 'altitude (km)';
-  h += `<text x="10" y="${mY.toFixed(1)}" font-size="9" fill="var(--text-tertiary)" text-anchor="middle" transform="rotate(-90 10 ${mY.toFixed(1)})">${altUnit}</text>`;
+  h += `<text x="10" y="${mY.toFixed(1)}" font-size="9" fill="var(--text-tertiary)" text-anchor="middle" transform="rotate(-90 10 ${mY.toFixed(1)})">${useMeters ? 'altitude (m)' : 'altitude (km)'}</text>`;
 
   // Reference lines
-  if (100 < hm) {
-    const y = project(0, 100, dm, hm).y;
-    h += `<line x1="${X0}" y1="${y.toFixed(1)}" x2="${X1}" y2="${y.toFixed(1)}" stroke="${SPEED_COLORS.sub}" stroke-width="0.5" stroke-dasharray="5 3" opacity="0.4"/>`;
-    h += `<text x="${X1 - 4}" y="${(y - 4).toFixed(1)}" font-size="9" fill="${SPEED_COLORS.sub}" text-anchor="end" opacity="0.55">edge of space (100 km)</text>`;
-  }
-  if (408 < hm) {
-    const y = project(0, 408, dm, hm).y;
-    h += `<line x1="${X0}" y1="${y.toFixed(1)}" x2="${X1}" y2="${y.toFixed(1)}" stroke="var(--border-tertiary)" stroke-width="0.5" stroke-dasharray="4 3" opacity="0.25"/>`;
-    h += `<text x="${X1 - 4}" y="${(y - 4).toFixed(1)}" font-size="9" fill="var(--text-tertiary)" text-anchor="end" opacity="0.45">ISS orbit ~408 km</text>`;
-  }
-  if (12 / hm > 0.04) {
-    const y = project(0, 12, dm, hm).y;
-    h += `<line x1="${X0}" y1="${y.toFixed(1)}" x2="${X1}" y2="${y.toFixed(1)}" stroke="var(--border-secondary)" stroke-width="0.5" stroke-dasharray="3 2" opacity="0.4"/>`;
-    h += `<text x="${X1 - 4}" y="${(y - 4).toFixed(1)}" font-size="9" fill="var(--text-tertiary)" text-anchor="end" opacity="0.6">commercial airspace (~12 km)</text>`;
-  }
+  h += renderRefLines(hm, dm);
 
   // Ground
   const groundY = project(0, 0, dm, hm).y;
@@ -206,7 +216,7 @@ function render() {
   // Trajectories
   TYPE_KEYS.forEach(tk => {
     const td = country[tk];
-    if (!td || (!allMode && TYPE_KEYS[active] !== tk)) return;
+    if (!td || (!allMode && TYPE_KEYS[selectedType] !== tk)) return;
     const tc = TYPE_COLORS[tk];
     const sw = allMode ? 1.8 : 2.5;
     const op = allMode ? 0.8 : 1;
@@ -230,7 +240,7 @@ function render() {
 
   // Phase summary cards
   if (!allMode) {
-    const tk = TYPE_KEYS[active];
+    const tk = TYPE_KEYS[selectedType];
     const td = country[tk];
     $summary.style.gridTemplateColumns = `repeat(${Math.min(FLIGHT_PHASES[tk].length, 4)}, minmax(0, 1fr))`;
     $summary.innerHTML = FLIGHT_PHASES[tk].map(p =>
@@ -248,16 +258,16 @@ function render() {
     $desc.textContent = '';
   }
 
-  renderLegend(allMode, allMode ? null : TYPE_KEYS[active]);
-  renderButtons(active);
+  renderLegend(allMode, allMode ? null : TYPE_KEYS[selectedType]);
+  renderButtons();
 }
 
-function renderButtons(active) {
+function renderButtons() {
   $buttons.innerHTML = [
     { label: 'All types', i: 3, tk: null },
     ...TYPE_KEYS.map((tk, i) => ({ label: TYPE_NAMES[tk], i, tk })),
   ].map(({ label, i, tk }) => {
-    const act = i === active;
+    const act = i === selectedType;
     const ac = tk ? TYPE_COLORS[tk] : 'var(--text-primary)';
     return `<button class="btn${act ? ' on' : ''}" data-type="${i}" style="${act ? `border-color:${ac};color:${ac};background:var(--bg-secondary);` : ''}">${label}</button>`;
   }).join('');
