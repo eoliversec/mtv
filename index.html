@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Missile Trajectory Visualization</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="theme-toggle">
+    <button class="btn theme-btn" data-theme="system">System</button>
+    <button class="btn theme-btn" data-theme="light">Light</button>
+    <button class="btn theme-btn" data-theme="dark">Dark</button>
+  </div>
+
+  <div class="controls">
+    <select id="country-select"></select>
+    <div id="type-buttons"></div>
+  </div>
+
+  <div id="legend" class="legend"></div>
+
+  <svg id="chart" viewBox="0 0 680 360" width="100%"></svg>
+  <div id="phase-summary"></div>
+  <div id="description"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
